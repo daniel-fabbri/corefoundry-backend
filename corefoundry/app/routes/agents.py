@@ -21,15 +21,14 @@ class CreateAgentRequest(BaseModel):
 
 class AgentResponse(BaseModel):
     """Response model for agent."""
+    model_config = {"from_attributes": True}
+    
     id: int
     name: str
     description: Optional[str]
     model_name: str
     config: Optional[dict]
     created_at: str
-    
-    class Config:
-        from_attributes = True
 
 
 class ChatRequest(BaseModel):

@@ -20,14 +20,13 @@ class UploadKnowledgeRequest(BaseModel):
 
 class KnowledgeChunkResponse(BaseModel):
     """Response model for knowledge chunk."""
+    model_config = {"from_attributes": True}
+    
     id: int
     content: str
     source: Optional[str]
     metadata: Optional[dict]
     created_at: str
-    
-    class Config:
-        from_attributes = True
 
 
 class SearchKnowledgeRequest(BaseModel):

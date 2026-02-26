@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: corefoundry_postgres
+    environment:
+      POSTGRES_DB: corefoundry
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # CoreFoundry Backend (uncomment when ready to use)
+  # backend:
+  #   build: .
+  #   container_name: corefoundry_backend
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql://postgres:postgres@postgres:5432/corefoundry
+  #     OLLAMA_HOST: http://host.docker.internal:11434
+  #     APP_HOST: 0.0.0.0
+  #     APP_PORT: 8000
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - ./corefoundry:/app/corefoundry
+  #   command: uvicorn corefoundry.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
