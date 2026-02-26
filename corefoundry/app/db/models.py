@@ -36,7 +36,7 @@ class Message(Base):
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
     role = Column(String(50), nullable=False)  # 'user', 'assistant', 'system'
     content = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    message_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -55,7 +55,7 @@ class Memory(Base):
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
     key = Column(String(255), nullable=False)
     value = Column(Text, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    memory_metadata = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -74,7 +74,7 @@ class KnowledgeChunk(Base):
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
     source = Column(String(500), nullable=True)
-    metadata = Column(JSON, nullable=True)
+    chunk_metadata = Column(JSON, nullable=True)
     embedding = Column(Text, nullable=True)  # Store as JSON string for now
     created_at = Column(DateTime, default=datetime.utcnow)
     

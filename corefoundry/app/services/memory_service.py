@@ -46,7 +46,7 @@ class MemoryService:
             # Update existing memory
             existing.value = value
             if metadata:
-                existing.metadata = metadata
+                existing.memory_metadata = metadata
             self.db.commit()
             self.db.refresh(existing)
             return existing
@@ -56,7 +56,7 @@ class MemoryService:
             agent_id=agent_id,
             key=key,
             value=value,
-            metadata=metadata
+            memory_metadata=metadata
         )
         self.db.add(memory)
         self.db.commit()

@@ -231,7 +231,7 @@ async def get_history(agent_id: int, limit: int = 50, db: Session = Depends(get_
             "role": msg.role,
             "content": msg.content,
             "created_at": msg.created_at.isoformat(),
-            "metadata": msg.metadata
+            "metadata": msg.message_metadata
         }
         for msg in reversed(messages)  # Return in chronological order
     ]

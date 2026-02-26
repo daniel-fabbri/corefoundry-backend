@@ -53,7 +53,7 @@ class KnowledgeService:
             knowledge_chunk = KnowledgeChunk(
                 content=chunk,
                 source=source,
-                metadata=chunk_metadata
+                chunk_metadata=chunk_metadata
             )
             self.db.add(knowledge_chunk)
             knowledge_chunks.append(knowledge_chunk)

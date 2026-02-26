@@ -123,7 +123,7 @@ class AgentService:
             agent_id=agent_id,
             role=role,
             content=content,
-            metadata=metadata
+            message_metadata=metadata
         )
         self.db.add(message)
         self.db.commit()

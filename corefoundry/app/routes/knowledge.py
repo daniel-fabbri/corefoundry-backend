@@ -96,7 +96,7 @@ async def search_knowledge(
             id=chunk.id,
             content=chunk.content,
             source=chunk.source,
-            metadata=chunk.metadata,
+            metadata=chunk.chunk_metadata,
             created_at=chunk.created_at.isoformat()
         )
         for chunk in chunks
@@ -129,7 +129,7 @@ async def get_chunks(
             id=chunk.id,
             content=chunk.content,
             source=chunk.source,
-            metadata=chunk.metadata,
+            metadata=chunk.chunk_metadata,
             created_at=chunk.created_at.isoformat()
         )
         for chunk in chunks
