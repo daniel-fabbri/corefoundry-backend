@@ -1,0 +1,22 @@
+# FastAPI and server
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+
+# Database
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# LangChain
+langchain==0.3.14
+langchain-community==0.3.14
+langchain-postgres==0.0.16
+
+# HTTP requests
+requests==2.32.3
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Text processing
+pypdf==5.1.0
