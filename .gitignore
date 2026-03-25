@@ -78,6 +78,9 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Frontend build (deployed from corefoundry-frontend)
+static/
+
 # IPython
 profile_default/
 ipython_config.py
