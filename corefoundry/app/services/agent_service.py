@@ -149,7 +149,7 @@ class AgentService:
             Message.agent_id == agent_id
         ).order_by(Message.created_at.desc()).limit(limit).all()
     
-    def chat(
+    async def chat(
         self,
         agent_id: int,
         user_input: str,
@@ -214,7 +214,7 @@ class AgentService:
         
         # Call Ollama
         try:
-            response = ollama_service.chat(
+            response = await ollama_service.chat(
                 messages=messages,
                 model=agent.model_name,
                 temperature=agent.config.get("temperature", 0.7) if agent.config else 0.7

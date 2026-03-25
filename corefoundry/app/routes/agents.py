@@ -165,7 +165,7 @@ async def chat(
     service = AgentService(db)
     
     try:
-        result = service.chat(
+        result = await service.chat(
             agent_id=agent_id,
             user_input=request.input,
             use_knowledge=request.use_knowledge

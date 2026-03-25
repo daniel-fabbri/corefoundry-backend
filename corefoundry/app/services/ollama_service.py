@@ -1,6 +1,6 @@
 """Ollama service for interacting with Ollama API."""
 
-import requests
+import httpx
 from typing import Dict, List, Any, Optional
 from corefoundry.configs.settings import settings
 
@@ -18,7 +18,7 @@ class OllamaService:
         self.host = host or settings.OLLAMA_HOST
         self.base_url = f"{self.host}/api"
     
-    def list_models(self) -> List[Dict[str, Any]]:
+    async def list_models(self) -> List[Dict[str, Any]]:
         """
         List available models in Ollama.
         
@@ -26,17 +26,18 @@ class OllamaService:
             List of model dictionaries
             
         Raises:
-            requests.RequestException: If request fails
+            httpx.HTTPError: If request fails
         """
         try:
-            response = requests.get(f"{self.base_url}/tags")
-            response.raise_for_status()
-            return response.json().get("models", [])
-        except requests.RequestException as e:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{self.base_url}/tags", timeout=30.0)
+                response.raise_for_status()
+                return response.json().get("models", [])
+        except httpx.HTTPError as e:
             print(f"Error listing models: {e}")
             return []
     
-    def run_prompt(
+    async def run_prompt(
         self,
         prompt: str,
         model: Optional[str] = None,
@@ -58,7 +59,7 @@ class OllamaService:
             Response dictionary with 'response' key containing the generated text
             
         Raises:
-            requests.RequestException: If request fails
+            httpx.HTTPError: If request fails
         """
         model = model or settings.OLLAMA_MODEL
         
@@ -75,18 +76,18 @@ class OllamaService:
             payload["system"] = system
         
         try:
-            response = requests.post(
-                f"{self.base_url}/generate",
-                json=payload,
-                timeout=300  # 5 minute timeout for generation
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/generate",
+                    json=payload
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as e:
             print(f"Error running prompt: {e}")
             raise
     
-    def chat(
+    async def chat(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
@@ -106,7 +107,7 @@ class OllamaService:
             Response dictionary
             
         Raises:
-            requests.RequestException: If request fails
+            httpx.HTTPError: If request fails
         """
         model = model or settings.OLLAMA_MODEL
         
@@ -120,18 +121,18 @@ class OllamaService:
         }
         
         try:
-            response = requests.post(
-                f"{self.base_url}/chat",
-                json=payload,
-                timeout=300
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat",
+                    json=payload
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as e:
             print(f"Error in chat: {e}")
             raise
     
-    def check_health(self) -> bool:
+    async def check_health(self) -> bool:
         """
         Check if Ollama is healthy and responding.
         
@@ -139,9 +140,10 @@ class OllamaService:
             True if Ollama is healthy, False otherwise
         """
         try:
-            response = requests.get(f"{self.host}/", timeout=5)
-            return response.status_code == 200
-        except requests.RequestException:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self.host}/")
+                return response.status_code == 200
+        except httpx.HTTPError:
             return False
 
 
