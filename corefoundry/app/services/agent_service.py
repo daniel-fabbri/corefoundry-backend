@@ -2,14 +2,12 @@
 
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
-from corefoundry.app.db.models import Agent, Message
+from corefoundry.app.db.models import Agent, Message, ChatUser, Thread
 from corefoundry.app.services.ollama_service import ollama_service
 from corefoundry.app.services.memory_service import MemoryService
 from corefoundry.app.services.knowledge_service import KnowledgeService
-from langchain_community.chat_models import ChatOllama
-from langchain.memory import ConversationBufferMemory
 from langchain_postgres import PostgresChatMessageHistory
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
+from langchain.schema import HumanMessage, AIMessage
 from corefoundry.configs.settings import settings
 
 
@@ -82,6 +80,76 @@ class AgentService:
         return self.db.query(Agent).order_by(
             Agent.created_at.desc()
         ).limit(limit).all()
+
+    def list_chat_users(self) -> List[ChatUser]:
+        """List all chat users."""
+        users = self.db.query(ChatUser).order_by(ChatUser.name.asc()).all()
+        if users:
+            return users
+        return [self.create_chat_user("Default User")]
+
+    def create_chat_user(self, name: str) -> ChatUser:
+        """Create a chat user if it does not already exist."""
+        existing = self.db.query(ChatUser).filter(ChatUser.name == name).first()
+        if existing:
+            return existing
+
+        user = ChatUser(name=name)
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def get_chat_user(self, user_id: int) -> Optional[ChatUser]:
+        """Get chat user by ID."""
+        return self.db.query(ChatUser).filter(ChatUser.id == user_id).first()
+
+    def create_thread(
+        self,
+        agent_id: int,
+        user_id: int,
+        title: Optional[str] = None
+    ) -> Thread:
+        """Create a thread scoped to a user and agent."""
+        agent = self.get_agent(agent_id)
+        if not agent:
+            raise ValueError(f"Agent {agent_id} not found")
+
+        user = self.get_chat_user(user_id)
+        if not user:
+            raise ValueError(f"User {user_id} not found")
+
+        thread = Thread(
+            agent_id=agent_id,
+            user_id=user_id,
+            title=title or f"Thread {agent.name}"
+        )
+        self.db.add(thread)
+        self.db.commit()
+        self.db.refresh(thread)
+        return thread
+
+    def list_threads(self, agent_id: int, user_id: int) -> List[Thread]:
+        """List threads for a specific user-agent pair."""
+        return self.db.query(Thread).filter(
+            Thread.agent_id == agent_id,
+            Thread.user_id == user_id
+        ).order_by(Thread.updated_at.desc()).all()
+
+    def get_thread(self, thread_id: int) -> Optional[Thread]:
+        """Get thread by ID."""
+        return self.db.query(Thread).filter(Thread.id == thread_id).first()
+
+    def validate_thread_scope(self, agent_id: int, user_id: int, thread_id: int) -> Thread:
+        """Validate that thread belongs to provided agent and user."""
+        thread = self.get_thread(thread_id)
+        if not thread:
+            raise ValueError(f"Thread {thread_id} not found")
+        if thread.agent_id != agent_id:
+            raise ValueError("Thread does not belong to the selected agent")
+        if thread.user_id != user_id:
+            raise ValueError("Thread does not belong to the selected user")
+        return thread
     
     def delete_agent(self, agent_id: int) -> bool:
         """
@@ -103,6 +171,7 @@ class AgentService:
     def save_message(
         self,
         agent_id: int,
+        thread_id: int,
         role: str,
         content: str,
         metadata: Optional[Dict[str, Any]] = None
@@ -112,6 +181,7 @@ class AgentService:
         
         Args:
             agent_id: Agent ID
+            thread_id: Thread ID
             role: Message role ('user', 'assistant', 'system')
             content: Message content
             metadata: Optional metadata
@@ -121,6 +191,7 @@ class AgentService:
         """
         message = Message(
             agent_id=agent_id,
+            thread_id=thread_id,
             role=role,
             content=content,
             message_metadata=metadata
@@ -133,6 +204,7 @@ class AgentService:
     def get_conversation_history(
         self,
         agent_id: int,
+        thread_id: int,
         limit: int = 50
     ) -> List[Message]:
         """
@@ -140,18 +212,50 @@ class AgentService:
         
         Args:
             agent_id: Agent ID
+            thread_id: Thread ID
             limit: Maximum number of messages
             
         Returns:
             List of Message objects
         """
         return self.db.query(Message).filter(
-            Message.agent_id == agent_id
+            Message.agent_id == agent_id,
+            Message.thread_id == thread_id
         ).order_by(Message.created_at.desc()).limit(limit).all()
+
+    def _sync_langchain_history(
+        self,
+        agent_id: int,
+        user_id: int,
+        thread_id: int,
+        user_input: str,
+        assistant_message: str
+    ) -> None:
+        """
+        Keep a LangChain-compatible history keyed by thread.
+
+        The session_id is scoped by agent/user/thread to guarantee memory isolation.
+        """
+        session_id = f"agent:{agent_id}:user:{user_id}:thread:{thread_id}"
+        try:
+            history = PostgresChatMessageHistory(
+                table_name="langchain_chat_histories",
+                session_id=session_id,
+                connection=settings.DATABASE_URL,
+            )
+            history.add_messages([
+                HumanMessage(content=user_input),
+                AIMessage(content=assistant_message),
+            ])
+        except Exception:
+            # Keep chat flow functional even if LangChain history table is not initialized.
+            return
     
     async def chat(
         self,
         agent_id: int,
+        user_id: int,
+        thread_id: int,
         user_input: str,
         use_knowledge: bool = False
     ) -> Dict[str, Any]:
@@ -160,6 +264,8 @@ class AgentService:
         
         Args:
             agent_id: Agent ID
+            user_id: User ID
+            thread_id: Thread ID
             user_input: User message
             use_knowledge: Whether to use knowledge base for context
             
@@ -172,12 +278,14 @@ class AgentService:
         agent = self.get_agent(agent_id)
         if not agent:
             raise ValueError(f"Agent {agent_id} not found")
+
+        self.validate_thread_scope(agent_id=agent_id, user_id=user_id, thread_id=thread_id)
         
         # Save user message
-        self.save_message(agent_id, "user", user_input)
+        self.save_message(agent_id, thread_id, "user", user_input)
         
         # Get conversation history
-        history = self.get_conversation_history(agent_id, limit=10)
+        history = self.get_conversation_history(agent_id, thread_id, limit=10)
         
         # Build messages for Ollama
         messages = []
@@ -223,14 +331,23 @@ class AgentService:
             assistant_message = response.get("message", {}).get("content", "")
             
             # Save assistant message
-            self.save_message(agent_id, "assistant", assistant_message)
+            self.save_message(agent_id, thread_id, "assistant", assistant_message)
+            self._sync_langchain_history(
+                agent_id=agent_id,
+                user_id=user_id,
+                thread_id=thread_id,
+                user_input=user_input,
+                assistant_message=assistant_message,
+            )
             
             return {
                 "response": assistant_message,
                 "metadata": {
                     "model": agent.model_name,
                     "agent_id": agent_id,
-                    "agent_name": agent.name
+                    "agent_name": agent.name,
+                    "thread_id": thread_id,
+                    "user_id": user_id,
                 }
             }
         except Exception as e:
@@ -239,6 +356,8 @@ class AgentService:
                 "response": error_message,
                 "metadata": {
                     "error": True,
-                    "agent_id": agent_id
+                    "agent_id": agent_id,
+                    "thread_id": thread_id,
+                    "user_id": user_id,
                 }
             }

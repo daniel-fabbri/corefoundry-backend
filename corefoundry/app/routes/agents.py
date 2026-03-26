@@ -34,6 +34,8 @@ class AgentResponse(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chat."""
     input: str
+    user_id: int
+    thread_id: int
     use_knowledge: bool = False
 
 
@@ -48,6 +50,38 @@ class UploadKnowledgeRequest(BaseModel):
     text: str
     source: Optional[str] = None
     metadata: Optional[dict] = None
+
+
+class ChatUserResponse(BaseModel):
+    """Response model for chat user."""
+    model_config = {"from_attributes": True}
+
+    id: int
+    name: str
+    created_at: str
+
+
+class CreateChatUserRequest(BaseModel):
+    """Request model for creating chat user."""
+    name: str
+
+
+class ThreadResponse(BaseModel):
+    """Response model for thread."""
+    model_config = {"from_attributes": True}
+
+    id: int
+    agent_id: int
+    user_id: int
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class CreateThreadRequest(BaseModel):
+    """Request model for creating thread."""
+    user_id: int
+    title: Optional[str] = None
 
 
 # Routes
@@ -167,6 +201,8 @@ async def chat(
     try:
         result = await service.chat(
             agent_id=agent_id,
+            user_id=request.user_id,
+            thread_id=request.thread_id,
             user_input=request.input,
             use_knowledge=request.use_knowledge
         )
@@ -203,12 +239,20 @@ async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{agent_id}/history")
-async def get_history(agent_id: int, limit: int = 50, db: Session = Depends(get_db)):
+async def get_history(
+    agent_id: int,
+    user_id: int,
+    thread_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
     """
     Get conversation history for an agent.
     
     Args:
         agent_id: Agent ID
+        user_id: Selected user ID
+        thread_id: Selected thread ID
         limit: Maximum number of messages
         db: Database session
         
@@ -222,7 +266,12 @@ async def get_history(agent_id: int, limit: int = 50, db: Session = Depends(get_
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    messages = service.get_conversation_history(agent_id, limit)
+    try:
+        service.validate_thread_scope(agent_id=agent_id, user_id=user_id, thread_id=thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    messages = service.get_conversation_history(agent_id, thread_id, limit)
     
     return [
         {
@@ -234,3 +283,80 @@ async def get_history(agent_id: int, limit: int = 50, db: Session = Depends(get_
         }
         for msg in reversed(messages)  # Return in chronological order
     ]
+
+
+@router.get("/chat-users", response_model=list[ChatUserResponse])
+async def list_chat_users(db: Session = Depends(get_db)):
+    """List all chat users."""
+    service = AgentService(db)
+    users = service.list_chat_users()
+
+    return [
+        ChatUserResponse(
+            id=user.id,
+            name=user.name,
+            created_at=user.created_at.isoformat(),
+        )
+        for user in users
+    ]
+
+
+@router.post("/chat-users", response_model=ChatUserResponse)
+async def create_chat_user(request: CreateChatUserRequest, db: Session = Depends(get_db)):
+    """Create a chat user."""
+    service = AgentService(db)
+    user = service.create_chat_user(request.name)
+
+    return ChatUserResponse(
+        id=user.id,
+        name=user.name,
+        created_at=user.created_at.isoformat(),
+    )
+
+
+@router.get("/{agent_id}/threads", response_model=list[ThreadResponse])
+async def list_threads(agent_id: int, user_id: int, db: Session = Depends(get_db)):
+    """List threads for a specific user-agent pair."""
+    service = AgentService(db)
+
+    if not service.get_agent(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not service.get_chat_user(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    threads = service.list_threads(agent_id=agent_id, user_id=user_id)
+    return [
+        ThreadResponse(
+            id=thread.id,
+            agent_id=thread.agent_id,
+            user_id=thread.user_id,
+            title=thread.title,
+            created_at=thread.created_at.isoformat(),
+            updated_at=thread.updated_at.isoformat(),
+        )
+        for thread in threads
+    ]
+
+
+@router.post("/{agent_id}/threads", response_model=ThreadResponse)
+async def create_thread(agent_id: int, request: CreateThreadRequest, db: Session = Depends(get_db)):
+    """Create a thread for a specific user-agent pair."""
+    service = AgentService(db)
+    try:
+        thread = service.create_thread(
+            agent_id=agent_id,
+            user_id=request.user_id,
+            title=request.title,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return ThreadResponse(
+        id=thread.id,
+        agent_id=thread.agent_id,
+        user_id=thread.user_id,
+        title=thread.title,
+        created_at=thread.created_at.isoformat(),
+        updated_at=thread.updated_at.isoformat(),
+    )

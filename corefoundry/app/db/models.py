@@ -22,6 +22,7 @@ class Agent(Base):
     # Relationships
     messages = relationship("Message", back_populates="agent", cascade="all, delete-orphan")
     memory_entries = relationship("Memory", back_populates="agent", cascade="all, delete-orphan")
+    threads = relationship("Thread", back_populates="agent", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Agent(id={self.id}, name='{self.name}', model='{self.model_name}')>"
@@ -34,6 +35,7 @@ class Message(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
+    thread_id = Column(Integer, ForeignKey("threads.id"), nullable=True, index=True)
     role = Column(String(50), nullable=False)  # 'user', 'assistant', 'system'
     content = Column(Text, nullable=False)
     message_metadata = Column(JSON, nullable=True)
@@ -41,6 +43,7 @@ class Message(Base):
     
     # Relationships
     agent = relationship("Agent", back_populates="messages")
+    thread = relationship("Thread", back_populates="messages")
     
     def __repr__(self):
         return f"<Message(id={self.id}, agent_id={self.agent_id}, role='{self.role}')>"
@@ -80,3 +83,39 @@ class KnowledgeChunk(Base):
     
     def __repr__(self):
         return f"<KnowledgeChunk(id={self.id}, source='{self.source}')>"
+
+
+class ChatUser(Base):
+    """Chat user model for thread ownership."""
+
+    __tablename__ = "chat_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    threads = relationship("Thread", back_populates="user", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<ChatUser(id={self.id}, name='{self.name}')>"
+
+
+class Thread(Base):
+    """Thread model for conversation isolation by user and agent."""
+
+    __tablename__ = "threads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("chat_users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=False, default="New Thread")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    agent = relationship("Agent", back_populates="threads")
+    user = relationship("ChatUser", back_populates="threads")
+    messages = relationship("Message", back_populates="thread", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Thread(id={self.id}, agent_id={self.agent_id}, user_id={self.user_id}, title='{self.title}')>"
