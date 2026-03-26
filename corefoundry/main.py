@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 import httpx
-from corefoundry.app.routes import health, agents, knowledge
+from corefoundry.app.routes import health, agents, knowledge, auth
 from corefoundry.configs.settings import settings
 
 # Create FastAPI app
@@ -28,6 +28,7 @@ app.add_middleware(
 
 # Include routers with /api prefix
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 

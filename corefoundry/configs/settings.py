@@ -34,5 +34,8 @@ class Settings:
     # Ollama default model
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama2")
 
+    # Security
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
+
 
 settings = Settings()
