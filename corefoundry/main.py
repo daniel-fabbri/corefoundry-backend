@@ -121,10 +121,18 @@ async def proxy_vite_assets(request: Request, full_path: str = ""):
 
 
 # Serve static files (frontend)
-# If a frontend build exists in /static, always serve it from root.
+# If a frontend build exists, always serve it from root.
 # This guarantees same-origin behavior (e.g. ngrok -> backend -> frontend+api).
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir):
+_main_dir = os.path.dirname(__file__)
+_static_candidates = [
+    os.getenv("FRONTEND_STATIC_DIR"),
+    os.path.abspath(os.path.join(_main_dir, "..", "static")),
+    os.path.abspath(os.path.join(_main_dir, "..", "..", "corefoundry-frontend", "dist")),
+]
+_static_candidates = [path for path in _static_candidates if path]
+static_dir = next((path for path in _static_candidates if os.path.isdir(path)), None)
+
+if static_dir:
     # Mount assets folder
     assets_dir = os.path.join(static_dir, "assets")
     if os.path.exists(assets_dir):
@@ -159,6 +167,11 @@ else:
             "version": "0.1.0",
             "description": "A simple way to build agents using LangChain and Ollama",
             "status": "Frontend not deployed",
+            "details": {
+                "reason": "No frontend static directory found",
+                "searched_paths": _static_candidates,
+                "hint": "Set FRONTEND_STATIC_DIR or copy frontend build to one of the searched paths"
+            },
             "endpoints": {
                 "health": "/api/health",
                 "docs": "/docs",
