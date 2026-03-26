@@ -48,16 +48,22 @@ def run_migration():
         if not chat_users_exists:
             print("✅ Creating chat_users table...")
             ChatUser.__table__.create(engine, checkfirst=True)
-            
-            # Create default chat user
-            conn.execute(text("""
-                INSERT INTO chat_users (name, created_at, updated_at)
-                VALUES ('Default User', NOW(), NOW())
-                ON CONFLICT DO NOTHING;
-            """))
-            print("✅ Created default chat user")
         else:
             print("⏭️  chat_users table already exists")
+        
+        # Always ensure default chat user exists (even if table already existed)
+        conn.execute(text("""
+            INSERT INTO chat_users (name, created_at, updated_at)
+            VALUES ('Default User', NOW(), NOW())
+            ON CONFLICT (name) DO NOTHING;
+        """))
+        
+        # Verify default user was created/exists
+        result = conn.execute(text("SELECT COUNT(*) FROM chat_users;"))
+        user_count = result.scalar()
+        if user_count == 0:
+            raise Exception("Failed to create default chat user")
+        print(f"✅ Chat users in database: {user_count}")
         
         # Check if threads table exists
         result = conn.execute(text("""
@@ -106,11 +112,16 @@ def run_migration():
             print(f"⚠️  Found {orphan_messages} messages without threads")
             print("✅ Creating default threads for existing messages...")
             
-            # Get or create default user
+            # Get default user (must exist at this point)
             result = conn.execute(text("""
                 SELECT id FROM chat_users ORDER BY id LIMIT 1;
             """))
             default_user_id = result.scalar()
+            
+            if default_user_id is None:
+                raise Exception("No chat_users found in database. Cannot create threads for orphan messages.")
+            
+            print(f"   Using default chat_user_id: {default_user_id}")
             
             # For each agent with orphan messages, create a thread
             result = conn.execute(text("""
@@ -119,27 +130,26 @@ def run_migration():
             agent_ids = [row[0] for row in result]
             
             for agent_id in agent_ids:
-                # Create a thread for this agent
-                conn.execute(text("""
+                # Create a thread for this agent and get the ID directly
+                result = conn.execute(text("""
                     INSERT INTO threads (agent_id, user_id, title, created_at, updated_at)
                     VALUES (:agent_id, :user_id, 'Legacy Thread', NOW(), NOW())
                     RETURNING id;
                 """), {"agent_id": agent_id, "user_id": default_user_id})
                 
-                thread_id_result = conn.execute(text("""
-                    SELECT id FROM threads 
-                    WHERE agent_id = :agent_id AND user_id = :user_id AND title = 'Legacy Thread'
-                    ORDER BY created_at DESC LIMIT 1;
-                """), {"agent_id": agent_id, "user_id": default_user_id})
+                thread_id = result.scalar()
                 
-                thread_id = thread_id_result.scalar()
+                if thread_id is None:
+                    raise Exception(f"Failed to create thread for agent_id {agent_id}")
                 
                 # Assign all orphan messages from this agent to this thread
-                conn.execute(text("""
+                update_result = conn.execute(text("""
                     UPDATE messages 
                     SET thread_id = :thread_id 
                     WHERE agent_id = :agent_id AND thread_id IS NULL;
                 """), {"thread_id": thread_id, "agent_id": agent_id})
+                
+                print(f"   ✓ Created thread {thread_id} for agent {agent_id}, migrated {update_result.rowcount} messages")
             
             print(f"✅ Migrated {orphan_messages} messages to default threads")
         else:
