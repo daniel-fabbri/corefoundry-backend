@@ -93,31 +93,44 @@ async def proxy_frontend_dev(full_path: str = ""):
 @app.get("/node_modules/{full_path:path}")
 async def proxy_vite_assets(request: Request, full_path: str = ""):
     """Proxy Vite dev server assets that are requested without /test prefix."""
-    # Get the full request path
+    # Get the full request path including query parameters
     request_path = request.url.path
+    query_string = str(request.url.query) if request.url.query else ""
     target_url = f"{DEV_SERVER_URL}{request_path}"
+    if query_string:
+        target_url += f"?{query_string}"
+    
+    print(f"[PROXY] Requesting: {target_url}")  # Debug log
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(target_url)
+            # Use the exact content-type from Vite server
+            content_type = resp.headers.get("content-type", "application/javascript")
+            
+            print(f"[PROXY] Response content-type: {content_type}, status: {resp.status_code}")  # Debug log
+            
             return Response(
                 content=resp.content,
-                media_type=resp.headers.get("content-type", "application/javascript"),
+                media_type=content_type,
                 status_code=resp.status_code
             )
-    except Exception:
-        return Response(content=b"", status_code=404)
+    except Exception as e:
+        print(f"[PROXY] Error: {str(e)}")  # Debug log
+        return Response(content=f"Proxy error: {str(e)}".encode(), status_code=404)
 
 
 # Serve static files (frontend)
+# In DEBUG mode, we use the /test proxy instead of static files
+# This prevents the catch-all route from interfering with Vite dev server proxies
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir):
+if os.path.exists(static_dir) and not settings.DEBUG:
     # Mount assets folder
     assets_dir = os.path.join(static_dir, "assets")
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
     
-    # Serve frontend for all other routes
+    # Serve frontend for all other routes  
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         """Serve frontend files, fallback to index.html for SPA routing."""
