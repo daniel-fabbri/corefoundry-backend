@@ -1,7 +1,7 @@
 """Main FastAPI application."""
 
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -84,6 +84,29 @@ async def proxy_frontend_dev(full_path: str = ""):
             "details": str(e),
             "url": DEV_SERVER_URL
         }
+
+
+# Proxy Vite-specific routes (for when not using /test prefix)
+@app.get("/@vite/{full_path:path}")
+@app.get("/@react-refresh")
+@app.get("/src/{full_path:path}")
+@app.get("/node_modules/{full_path:path}")
+async def proxy_vite_assets(request: Request, full_path: str = ""):
+    """Proxy Vite dev server assets that are requested without /test prefix."""
+    # Get the full request path
+    request_path = request.url.path
+    target_url = f"{DEV_SERVER_URL}{request_path}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(target_url)
+            return Response(
+                content=resp.content,
+                media_type=resp.headers.get("content-type", "application/javascript"),
+                status_code=resp.status_code
+            )
+    except Exception:
+        return Response(content=b"", status_code=404)
 
 
 # Serve static files (frontend)
