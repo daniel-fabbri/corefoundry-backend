@@ -3,6 +3,7 @@
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
 from corefoundry.app.db.models import Agent, Message, ChatUser, Thread
+from corefoundry.app.db.auth_models import AuthUser
 from corefoundry.app.services.ollama_service import ollama_service
 from corefoundry.app.services.memory_service import MemoryService
 from corefoundry.app.services.knowledge_service import KnowledgeService
@@ -115,7 +116,8 @@ class AgentService:
         if not agent:
             raise ValueError(f"Agent {agent_id} not found")
 
-        user = self.get_chat_user(user_id)
+        # Validate user exists in auth_users
+        user = self.db.query(AuthUser).filter(AuthUser.id == user_id).first()
         if not user:
             raise ValueError(f"User {user_id} not found")
 

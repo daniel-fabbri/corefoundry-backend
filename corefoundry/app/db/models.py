@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from corefoundry.app.db.connection import Base
+from corefoundry.app.db.auth_models import AuthUser
 
 
 class Agent(Base):
@@ -86,7 +87,7 @@ class KnowledgeChunk(Base):
 
 
 class ChatUser(Base):
-    """Chat user model for thread ownership."""
+    """Chat user model for thread ownership (deprecated - use AuthUser)."""
 
     __tablename__ = "chat_users"
 
@@ -95,7 +96,7 @@ class ChatUser(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    threads = relationship("Thread", back_populates="user", cascade="all, delete-orphan")
+    # Note: threads relationship removed - now using AuthUser for threads
 
     def __repr__(self):
         return f"<ChatUser(id={self.id}, name='{self.name}')>"
@@ -108,13 +109,13 @@ class Thread(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("chat_users.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("auth_users.id"), nullable=False, index=True)
     title = Column(String(255), nullable=False, default="New Thread")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     agent = relationship("Agent", back_populates="threads")
-    user = relationship("ChatUser", back_populates="threads")
+    user = relationship("AuthUser", foreign_keys=[user_id])
     messages = relationship("Message", back_populates="thread", cascade="all, delete-orphan")
 
     def __repr__(self):
