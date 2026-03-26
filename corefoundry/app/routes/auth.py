@@ -3,7 +3,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
 from corefoundry.app.db.connection import get_db
 from corefoundry.app.services.auth_service import AuthService
@@ -19,6 +19,17 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     username: str
     password: str
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        """Validate password."""
+        if not v or len(v) < 3:
+            raise ValueError('Password must be at least 3 characters')
+        # Truncate to 72 bytes for bcrypt
+        if len(v.encode('utf-8')) > 72:
+            v = v.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+        return v
 
 
 class LoginRequest(BaseModel):
@@ -80,6 +91,9 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     """Register a new user."""
     auth_service = AuthService(db)
     
+    # Debug: log password length
+    print(f"[DEBUG] Register - Password length: {len(request.password)} chars, {len(request.password.encode('utf-8'))} bytes")
+    
     try:
         user = auth_service.create_user(
             email=request.email,
@@ -88,6 +102,9 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"[ERROR] Registration error: {e}")
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
     
     access_token = auth_service.create_access_token(user.id)
     

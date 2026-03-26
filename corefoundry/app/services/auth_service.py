@@ -24,6 +24,11 @@ class AuthService:
 
     def get_password_hash(self, password: str) -> str:
         """Generate password hash."""
+        # Bcrypt has a 72 byte limit, truncate if necessary
+        if isinstance(password, str):
+            password_bytes = password.encode('utf-8')
+            if len(password_bytes) > 72:
+                password = password_bytes[:72].decode('utf-8', errors='ignore')
         return pwd_context.hash(password)
 
     def create_user(self, email: str, username: str, password: str) -> AuthUser:
