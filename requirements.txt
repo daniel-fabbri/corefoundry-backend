@@ -23,6 +23,7 @@ python-dotenv==1.0.1
 pypdf==5.1.0
 
 # Authentication
+bcrypt==4.0.1
 passlib[bcrypt]==1.7.4
 pyjwt==2.10.1
 
