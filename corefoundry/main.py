@@ -32,24 +32,58 @@ app.include_router(agents.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 
 
-# Development proxy/test route to fetch frontend from local dev server
+# Development proxy to local frontend dev server
+DEV_SERVER_URL = "http://127.0.0.1:5173"
+
 @app.get("/test")
-async def test_local_frontend():
-    """Fetch the frontend bundle from a local dev server (127.0.0.1:5173).
-    Useful when running the frontend with `npm run dev` and testing via the API host.
+@app.get("/test/{full_path:path}")
+async def proxy_frontend_dev(full_path: str = ""):
     """
-    dev_url = "http://localhost:5173/"
+    Reverse proxy to frontend dev server (Vite on port 5173).
+    Proxies all requests under /test/ to the dev server, enabling
+    full frontend functionality including hot reload.
+    """
+    target_url = f"{DEV_SERVER_URL}/{full_path}"
+    
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            resp = await client.get(dev_url)
+            resp = await client.get(target_url)
+            
+            # Get content type and content
             media_type = resp.headers.get("content-type", "text/html")
-            return Response(content=resp.content, media_type=media_type, status_code=resp.status_code)
-    except httpx.ConnectError as e:
-        return {"error": "Frontend dev server not running", "details": "Make sure to run 'npm run dev' in corefoundry-frontend", "url": dev_url}
+            content = resp.content
+            
+            # For HTML responses, rewrite URLs to work through the proxy
+            if "text/html" in media_type and full_path == "":
+                content_str = content.decode("utf-8")
+                # Replace absolute paths with /test prefix
+                content_str = content_str.replace('href="/', 'href="/test/')
+                content_str = content_str.replace('src="/', 'src="/test/')
+                content_str = content_str.replace('from "/', 'from "/test/')
+                content = content_str.encode("utf-8")
+            
+            return Response(
+                content=content,
+                media_type=media_type,
+                status_code=resp.status_code
+            )
+    except httpx.ConnectError:
+        return {
+            "error": "Frontend dev server not running",
+            "details": "Make sure to run 'npm run dev' in corefoundry-frontend",
+            "url": DEV_SERVER_URL
+        }
     except httpx.TimeoutException:
-        return {"error": "Frontend dev server timeout", "details": "Server is taking too long to respond", "url": dev_url}
+        return {
+            "error": "Frontend dev server timeout",
+            "url": DEV_SERVER_URL
+        }
     except Exception as e:
-        return {"error": "Could not reach frontend dev server", "details": str(e), "url": dev_url}
+        return {
+            "error": "Could not reach frontend dev server",
+            "details": str(e),
+            "url": DEV_SERVER_URL
+        }
 
 
 # Serve static files (frontend)
