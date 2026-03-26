@@ -317,12 +317,15 @@ async def create_chat_user(request: CreateChatUserRequest, db: Session = Depends
 @router.get("/{agent_id}/threads", response_model=list[ThreadResponse])
 async def list_threads(agent_id: int, user_id: int, db: Session = Depends(get_db)):
     """List threads for a specific user-agent pair."""
+    from corefoundry.app.db.auth_models import AuthUser
     service = AgentService(db)
 
     if not service.get_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    if not service.get_chat_user(user_id):
+    # Validate user exists in auth_users (not chat_users)
+    user = db.query(AuthUser).filter(AuthUser.id == user_id).first()
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     threads = service.list_threads(agent_id=agent_id, user_id=user_id)
