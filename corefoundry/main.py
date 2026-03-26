@@ -121,10 +121,10 @@ async def proxy_vite_assets(request: Request, full_path: str = ""):
 
 
 # Serve static files (frontend)
-# In DEBUG mode, we use the /test proxy instead of static files
-# This prevents the catch-all route from interfering with Vite dev server proxies
+# If a frontend build exists in /static, always serve it from root.
+# This guarantees same-origin behavior (e.g. ngrok -> backend -> frontend+api).
 static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir) and not settings.DEBUG:
+if os.path.exists(static_dir):
     # Mount assets folder
     assets_dir = os.path.join(static_dir, "assets")
     if os.path.exists(assets_dir):
