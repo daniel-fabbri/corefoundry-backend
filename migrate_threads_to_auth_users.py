@@ -87,42 +87,49 @@ def run_migration():
             """))
             print(f"   ✓ Dropped constraint: {constraint_name}")
         
-        print("\n4️⃣ Adding new foreign key to auth_users...")
-        try:
-            conn.execute(text("""
-                ALTER TABLE threads 
-                ADD CONSTRAINT threads_user_id_fkey 
-                FOREIGN KEY (user_id) 
-                REFERENCES auth_users(id) 
-                ON DELETE CASCADE;
-            """))
-            print("   ✓ Added constraint: threads_user_id_fkey -> auth_users(id)")
-        except Exception as e:
-            if "violates foreign key constraint" in str(e):
-                print("   ⚠️  Warning: Some thread user_ids don't exist in auth_users")
-                print("   Attempting to clean up orphaned threads...")
-                
-                # Delete threads with user_ids that don't exist in auth_users
-                result = conn.execute(text("""
-                    DELETE FROM threads 
-                    WHERE user_id NOT IN (SELECT id FROM auth_users);
-                """))
-                deleted_count = result.rowcount
-                print(f"   ✓ Deleted {deleted_count} orphaned threads")
-                
-                # Try adding constraint again
-                conn.execute(text("""
-                    ALTER TABLE threads 
-                    ADD CONSTRAINT threads_user_id_fkey 
-                    FOREIGN KEY (user_id) 
-                    REFERENCES auth_users(id) 
-                    ON DELETE CASCADE;
-                """))
-                print("   ✓ Added constraint: threads_user_id_fkey -> auth_users(id)")
-            else:
-                raise
+        print("\n4️⃣ Checking for orphaned threads...")
+        # Check which threads have user_ids not in auth_users
+        result = conn.execute(text("""
+            SELECT COUNT(*) 
+            FROM threads 
+            WHERE user_id NOT IN (SELECT id FROM auth_users);
+        """))
+        orphan_count = result.scalar()
         
-        print("\n5️⃣ Verifying migration...")
+        if orphan_count > 0:
+            print(f"   ⚠️  Found {orphan_count} orphaned threads (user_ids not in auth_users)")
+            
+            # Show which user_ids are orphaned
+            result = conn.execute(text("""
+                SELECT DISTINCT user_id 
+                FROM threads 
+                WHERE user_id NOT IN (SELECT id FROM auth_users)
+                ORDER BY user_id;
+            """))
+            orphan_ids = [row[0] for row in result.fetchall()]
+            print(f"   Orphaned user_ids: {orphan_ids}")
+            
+            # Delete orphaned threads
+            result = conn.execute(text("""
+                DELETE FROM threads 
+                WHERE user_id NOT IN (SELECT id FROM auth_users);
+            """))
+            deleted_count = result.rowcount
+            print(f"   ✓ Deleted {deleted_count} orphaned threads")
+        else:
+            print("   ✓ No orphaned threads found")
+        
+        print("\n5️⃣ Adding new foreign key to auth_users...")
+        conn.execute(text("""
+            ALTER TABLE threads 
+            ADD CONSTRAINT threads_user_id_fkey 
+            FOREIGN KEY (user_id) 
+            REFERENCES auth_users(id) 
+            ON DELETE CASCADE;
+        """))
+        print("   ✓ Added constraint: threads_user_id_fkey -> auth_users(id)")
+        
+        print("\n6️⃣ Verifying migration...")
         result = conn.execute(text("""
             SELECT 
                 tc.constraint_name,

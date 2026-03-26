@@ -16,6 +16,13 @@ Esta migração remove o campo de seleção de usuário da página de chat e usa
 
 ## Passos para rodar no Ubuntu
 
+⚠️ **IMPORTANTE**: Se a migração falhou anteriormente, primeiro execute:
+```bash
+python fix_threads_fk.py
+```
+
+Este script restaura o estado do banco e permite tentar a migração novamente.
+
 ### 1. Pull das alterações
 ```bash
 cd /caminho/para/CoreFoundry
