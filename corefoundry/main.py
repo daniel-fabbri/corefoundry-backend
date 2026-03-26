@@ -4,7 +4,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+import httpx
 from corefoundry.app.routes import health, agents, knowledge
 from corefoundry.configs.settings import settings
 
@@ -38,6 +39,22 @@ if os.path.exists(static_dir):
     assets_dir = os.path.join(static_dir, "assets")
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    
+    # Development proxy/test route to fetch frontend from local dev server
+    @app.get("/test")
+    async def test_local_frontend():
+        """Fetch the frontend bundle from a local dev server (localhost:5173).
+        Useful when running the frontend with `npm run dev` and testing via the API host.
+        """
+        dev_url = "http://localhost:5174/"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(dev_url)
+                media_type = resp.headers.get("content-type", "text/html")
+                return Response(content=resp.content, media_type=media_type, status_code=resp.status_code)
+        except Exception:
+            # Fallback message if the dev server is not reachable
+            return {"error": "Could not reach frontend dev server at http://localhost:5174"}
     
     # Serve frontend for all other routes
     @app.get("/{full_path:path}")
