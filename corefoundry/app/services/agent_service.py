@@ -394,6 +394,18 @@ JSON:"""
                 "content": agent.config["system_prompt"]
             })
         
+        # Add memories context (always include stored memories)
+        memories = self.memory_service.get_all_memories(agent_id)
+        if memories:
+            memory_context = "Information I remember about you and our interactions:\n"
+            for memory in memories:
+                memory_context += f"- {memory.key}: {memory.value}\n"
+            logger.info("Adding %d memories to context", len(memories))
+            messages.append({
+                "role": "system",
+                "content": memory_context
+            })
+        
         # Add knowledge context if requested
         if use_knowledge:
             logger.info("Knowledge search: query='%s' agent_id=%s", user_input, agent_id)
