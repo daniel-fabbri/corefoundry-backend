@@ -1,13 +1,18 @@
 """Agent routes."""
 
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from corefoundry.app.db.connection import get_db
 from corefoundry.app.services.agent_service import AgentService
+from corefoundry.app.services.memory_service import MemoryService
+from corefoundry.app.services.knowledge_service import KnowledgeService
 from corefoundry.app.db.auth_models import AuthUser
 from corefoundry.app.routes.auth import get_current_user
+import os
+from pathlib import Path
+import shutil
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -82,6 +87,27 @@ class ThreadResponse(BaseModel):
 class CreateThreadRequest(BaseModel):
     """Request model for creating thread."""
     title: Optional[str] = None
+
+
+class MemoryResponse(BaseModel):
+    """Response model for memory."""
+    model_config = {"from_attributes": True}
+
+    id: int
+    agent_id: int
+    key: str
+    value: str
+    metadata: Optional[dict]
+    created_at: str
+    updated_at: str
+
+
+class KnowledgeFileResponse(BaseModel):
+    """Response model for knowledge file."""
+    filename: str
+    size: int
+    created_at: str
+    agent_id: int
 
 
 # Routes
@@ -427,3 +453,208 @@ async def create_thread(
         created_at=thread.created_at.isoformat(),
         updated_at=thread.updated_at.isoformat(),
     )
+
+
+# Memory routes
+@router.get("/{agent_id}/memories", response_model=List[MemoryResponse])
+async def get_agent_memories(
+    agent_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all memories for an agent."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    memory_service = MemoryService(db)
+    memories = memory_service.get_all_memories(agent_id)
+    
+    return [
+        MemoryResponse(
+            id=memory.id,
+            agent_id=memory.agent_id,
+            key=memory.key,
+            value=memory.value,
+            metadata=memory.memory_metadata,
+            created_at=memory.created_at.isoformat(),
+            updated_at=memory.updated_at.isoformat(),
+        )
+        for memory in memories
+    ]
+
+
+# Knowledge routes
+@router.post("/{agent_id}/knowledge/upload")
+async def upload_knowledge_file(
+    agent_id: int,
+    file: UploadFile = File(...),
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upload a knowledge file (txt, csv, pdf) for an agent."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Validate file type
+    allowed_extensions = ['.txt', '.csv', '.pdf']
+    file_ext = os.path.splitext(file.filename)[0] if file.filename else ''
+    if not any(file.filename.lower().endswith(ext) for ext in allowed_extensions):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}"
+        )
+    
+    # Create uploads directory structure
+    upload_dir = Path("uploads") / str(agent_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate unique filename if file already exists
+    original_filename = file.filename
+    file_path = upload_dir / original_filename
+    counter = 1
+    while file_path.exists():
+        name, ext = os.path.splitext(original_filename)
+        file_path = upload_dir / f"{name}_{counter}{ext}"
+        counter += 1
+    
+    # Save file
+    try:
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+    
+    # Read and process file content
+    try:
+        content = ""
+        if file_path.suffix == '.txt':
+            content = file_path.read_text(encoding='utf-8')
+        elif file_path.suffix == '.csv':
+            import csv
+            with file_path.open('r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                content = '\n'.join([','.join(row) for row in reader])
+        elif file_path.suffix == '.pdf':
+            try:
+                from pypdf import PdfReader
+                with file_path.open('rb') as f:
+                    pdf_reader = PdfReader(f)
+                    content = '\n'.join([page.extract_text() for page in pdf_reader.pages])
+            except ImportError:
+                raise HTTPException(
+                    status_code=500,
+                    detail="PDF support not available. Install pypdf."
+                )
+        
+        # Store in knowledge base
+        knowledge_service = KnowledgeService(db)
+        chunks = knowledge_service.upload_text(
+            text=content,
+            agent_id=agent_id,
+            source=file_path.name,
+            metadata={
+                "original_filename": original_filename,
+                "file_type": file_path.suffix,
+                "agent_id": agent_id
+            }
+        )
+        
+        return {
+            "message": "File uploaded successfully",
+            "filename": file_path.name,
+            "chunks_created": len(chunks),
+            "agent_id": agent_id
+        }
+    
+    except Exception as e:
+        # Clean up file if processing fails
+        if file_path.exists():
+            file_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
+
+
+@router.get("/{agent_id}/knowledge/files", response_model=List[KnowledgeFileResponse])
+async def list_knowledge_files(
+    agent_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List all knowledge files for an agent."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get files from uploads directory
+    upload_dir = Path("uploads") / str(agent_id)
+    if not upload_dir.exists():
+        return []
+    
+    files = []
+    for file_path in upload_dir.iterdir():
+        if file_path.is_file():
+            stat = file_path.stat()
+            files.append(
+                KnowledgeFileResponse(
+                    filename=file_path.name,
+                    size=stat.st_size,
+                    created_at=str(stat.st_ctime),
+                    agent_id=agent_id
+                )
+            )
+    
+    return files
+
+
+@router.delete("/{agent_id}/knowledge/files/{filename}")
+async def delete_knowledge_file(
+    agent_id: int,
+    filename: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a knowledge file and its associated chunks."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Delete file
+    file_path = Path("uploads") / str(agent_id) / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    try:
+        file_path.unlink()
+        
+        # Delete associated knowledge chunks
+        knowledge_service = KnowledgeService(db)
+        knowledge_service.delete_by_source(agent_id, filename)
+        
+        return {"message": "File deleted successfully", "filename": filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")

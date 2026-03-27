@@ -310,12 +310,16 @@ class AgentService:
         
         # Add knowledge context if requested
         if use_knowledge:
-            relevant_chunks = self.knowledge_service.search_chunks(user_input, limit=3)
+            relevant_chunks = self.knowledge_service.search_chunks(
+                query=user_input,
+                agent_id=agent_id,
+                limit=3
+            )
             if relevant_chunks:
                 context = "\n\n".join([chunk.content for chunk in relevant_chunks])
                 messages.append({
                     "role": "system",
-                    "content": f"Relevant context:\n{context}"
+                    "content": f"Relevant context from knowledge base:\n{context}"
                 })
         
         # Add conversation history (reverse to get chronological order)

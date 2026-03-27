@@ -78,6 +78,7 @@ class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
     
     id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True, index=True)
     content = Column(Text, nullable=False)
     source = Column(String(500), nullable=True)
     chunk_metadata = Column(JSON, nullable=True)
@@ -85,7 +86,7 @@ class KnowledgeChunk(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     def __repr__(self):
-        return f"<KnowledgeChunk(id={self.id}, source='{self.source}')>"
+        return f"<KnowledgeChunk(id={self.id}, source='{self.source}', agent_id={self.agent_id})>"
 
 
 class ChatUser(Base):
