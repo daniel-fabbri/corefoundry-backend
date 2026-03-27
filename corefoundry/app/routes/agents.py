@@ -103,6 +103,19 @@ class MemoryResponse(BaseModel):
     updated_at: str
 
 
+class MemorySaveRequest(BaseModel):
+    """Request model for saving memory."""
+    key: str
+    value: str
+    metadata: Optional[dict] = None
+
+
+class MemoryUpdateRequest(BaseModel):
+    """Request model for updating memory."""
+    value: str
+    metadata: Optional[dict] = None
+
+
 class KnowledgeFileResponse(BaseModel):
     """Response model for knowledge file."""
     filename: str
@@ -489,6 +502,118 @@ async def get_agent_memories(
         )
         for memory in memories
     ]
+
+
+@router.post("/{agent_id}/memories", response_model=MemoryResponse)
+async def save_agent_memory(
+    agent_id: int,
+    request: MemorySaveRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Save a memory for an agent (create or update)."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    memory_service = MemoryService(db)
+    memory = memory_service.save_memory(
+        agent_id=agent_id,
+        key=request.key,
+        value=request.value,
+        metadata=request.metadata
+    )
+    
+    return MemoryResponse(
+        id=memory.id,
+        agent_id=memory.agent_id,
+        key=memory.key,
+        value=memory.value,
+        metadata=memory.memory_metadata,
+        created_at=memory.created_at.isoformat(),
+        updated_at=memory.updated_at.isoformat(),
+    )
+
+
+@router.put("/{agent_id}/memories/{key}", response_model=MemoryResponse)
+async def update_agent_memory(
+    agent_id: int,
+    key: str,
+    request: MemoryUpdateRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update an existing memory for an agent."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    memory_service = MemoryService(db)
+    
+    # Check if memory exists
+    existing = memory_service.get_memory(agent_id, key)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Memory with key '{key}' not found")
+    
+    # Update memory
+    memory = memory_service.save_memory(
+        agent_id=agent_id,
+        key=key,
+        value=request.value,
+        metadata=request.metadata
+    )
+    
+    return MemoryResponse(
+        id=memory.id,
+        agent_id=memory.agent_id,
+        key=memory.key,
+        value=memory.value,
+        metadata=memory.memory_metadata,
+        created_at=memory.created_at.isoformat(),
+        updated_at=memory.updated_at.isoformat(),
+    )
+
+
+@router.delete("/{agent_id}/memories/{key}")
+async def delete_agent_memory(
+    agent_id: int,
+    key: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a specific memory for an agent."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    memory_service = MemoryService(db)
+    
+    # Check if memory exists
+    existing = memory_service.get_memory(agent_id, key)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Memory with key '{key}' not found")
+    
+    memory_service.delete_memory(agent_id, key)
+    
+    return {"message": f"Memory '{key}' deleted successfully"}
 
 
 # Knowledge routes

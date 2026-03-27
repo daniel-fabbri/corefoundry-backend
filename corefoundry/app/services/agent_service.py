@@ -263,6 +263,86 @@ class AgentService:
             # Keep chat flow functional even if LangChain history table is not initialized.
             return
     
+    async def _extract_and_save_memories(
+        self,
+        agent_id: int,
+        user_input: str,
+        assistant_message: str,
+        model_name: str
+    ) -> None:
+        """
+        Extract important information from conversation and save as memories.
+        
+        Args:
+            agent_id: Agent ID
+            user_input: User's message
+            assistant_message: Assistant's response
+            model_name: Model to use for extraction
+        """
+        logger = logging.getLogger("corefoundry.agent.memory")
+        
+        try:
+            # Create a prompt to extract memorable information
+            extraction_prompt = f"""Analyze the following conversation and extract important information that should be remembered.
+
+User: {user_input}
+Assistant: {assistant_message}
+
+Extract information in the following format (only if relevant information exists):
+- If the user mentions their name, preferences, projects, or personal information
+- If important facts or decisions are discussed
+- If specific details about tasks or goals are mentioned
+
+Return ONLY a JSON object with key-value pairs of memorable information. Keys should be descriptive (e.g., "user_name", "preferred_language", "current_project").
+If there's nothing important to remember, return an empty JSON object: {{}}
+
+Example response:
+{{"user_name": "João", "preferred_language": "Python", "current_project": "CoreFoundry"}}
+
+JSON:"""
+
+            # Call LLM to extract memories
+            response = await ollama_service.chat(
+                messages=[{"role": "user", "content": extraction_prompt}],
+                model=model_name,
+                temperature=0.1  # Low temperature for consistent extraction
+            )
+            
+            content = response.get("message", {}).get("content", "").strip()
+            
+            # Try to parse JSON response
+            import json
+            try:
+                # Extract JSON from response (handle markdown code blocks)
+                if "```json" in content:
+                    content = content.split("```json")[1].split("```")[0].strip()
+                elif "```" in content:
+                    content = content.split("```")[1].split("```")[0].strip()
+                
+                memories = json.loads(content)
+                
+                # Save each memory
+                if memories and isinstance(memories, dict):
+                    for key, value in memories.items():
+                        if key and value:  # Only save non-empty keys/values
+                            self.memory_service.save_memory(
+                                agent_id=agent_id,
+                                key=key,
+                                value=str(value),
+                                metadata={
+                                    "auto_extracted": True,
+                                    "source": "conversation"
+                                }
+                            )
+                            logger.info(f"Auto-saved memory: {key} = {value}")
+            
+            except json.JSONDecodeError:
+                logger.debug(f"Could not parse memories from LLM response: {content}")
+                
+        except Exception as e:
+            # Don't break chat flow if memory extraction fails
+            logger.warning(f"Failed to extract memories: {str(e)}")
+    
     async def chat(
         self,
         agent_id: int,
@@ -374,6 +454,18 @@ class AgentService:
                 user_input=user_input,
                 assistant_message=assistant_message,
             )
+            
+            # Extract and save memories (async, non-blocking)
+            try:
+                await self._extract_and_save_memories(
+                    agent_id=agent_id,
+                    user_input=user_input,
+                    assistant_message=assistant_message,
+                    model_name=agent.model_name
+                )
+            except Exception:
+                # Don't break chat flow if memory extraction fails
+                pass
             
             return {
                 "response": assistant_message,
