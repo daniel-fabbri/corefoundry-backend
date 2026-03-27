@@ -7,7 +7,15 @@
 - **Problema**: Endpoint `/api/agents/{id}/history` chamava método inexistente
 - **Solução**: Trocado `service.get_messages()` → `service.get_conversation_history()`
 
-### 2. Logs de Debug Implementados
+### 2. Busca de Knowledge não encontrando chunks
+**Arquivo**: `corefoundry/app/services/knowledge_service.py`
+- **Problema**: Busca procurava frase completa (ex: "qual era a cor da tela?") em vez de palavras-chave
+- **Solução**: Implementada extração de keywords com remoção de stop words
+  - Query: "qual era a cor da tela?" → Keywords: `['cor', 'tela']`
+  - SQL: `WHERE (content ILIKE '%cor%' OR content ILIKE '%tela%')`
+  - Agora encontra chunks que contenham QUALQUER palavra-chave relevante
+
+### 3. Logs de Debug Implementados
 **Arquivos**: 
 - `corefoundry/app/services/agent_service.py`
 - `corefoundry/app/services/knowledge_service.py`
@@ -15,10 +23,12 @@
 
 Agora o sistema loga:
 - `use_knowledge` flag (true/false)
+- Keywords extraídas da query
 - Quantos chunks foram encontrados
 - Preview de cada chunk (source, agent_id, conteúdo)
 - Warnings quando nenhum chunk é encontrado
 - Total de chunks no banco (para diagnóstico)
+- Amostra do conteúdo dos chunks quando nenhum match é encontrado
 
 ## 🚀 Como Testar no Ubuntu
 
@@ -80,6 +90,7 @@ Quando `use_knowledge=true`:
 [INFO] corefoundry.agent.chat: === CHAT REQUEST === agent_id=10 user_id=1 thread_id=16 use_knowledge=True
 [INFO] corefoundry.agent.chat: Knowledge search: query='Qual era a cor do barco?' agent_id=10
 [INFO] corefoundry.knowledge.search: Searching chunks: query='Qual era a cor do barco?' agent_id=10 limit=3
+[INFO] corefoundry.knowledge.search: Extracted keywords: ['cor', 'barco']
 [INFO] corefoundry.knowledge.search: Filtering by agent_id=10
 [INFO] corefoundry.knowledge.search: Search returned 1 chunks
 [INFO] corefoundry.agent.chat: Found 1 relevant chunks
@@ -87,10 +98,38 @@ Quando `use_knowledge=true`:
 [INFO] corefoundry.agent.chat: Adding context to messages (41 chars total)
 ```
 
+### 🔍 Como Funciona a Busca por Keywords
+
+A busca agora é **inteligente**:
+1. Remove stop words (qual, era, a, o, da, do, etc)
+2. Remove palavras muito curtas (< 3 caracteres)
+3. Busca chunks que contenham **QUALQUER** palavra-chave
+
+**Exemplo:**
+```
+Query: "qual era a cor da tela?"
+Keywords extraídas: ['cor', 'tela']
+SQL: WHERE (content ILIKE '%cor%' OR content ILIKE '%tela%')
+
+Chunks encontrados:
+✅ "A tela era azul" (contém 'tela')
+✅ "A cor do barco é vermelha" (contém 'cor')
+✅ "A tela e a cor estão definidas" (contém ambas)
+❌ "O céu estava bonito" (não contém nenhuma)
+```
+
+**Teste a extração de keywords:**
+```bash
+cd ~/Documents/corefoundry-backend
+python3 test_keywords.py
+```
+
 Se **NENHUM chunk** for encontrado:
 ```log
+[INFO] corefoundry.knowledge.search: Extracted keywords: ['cor', 'tela']
 [INFO] corefoundry.knowledge.search: Search returned 0 chunks
 [WARNING] corefoundry.knowledge.search: No matches found! Total chunks in DB: 5, Chunks for agent_id=10: 2
+[WARNING] corefoundry.knowledge.search: Sample chunk content: 'O barco era vermelho...'
 [WARNING] corefoundry.agent.chat: NO CHUNKS FOUND! Check: 1) chunks exist for agent_id=10, 2) query matches content
 [INFO] corefoundry.agent.chat: use_knowledge=False, skipping knowledge search
 ```
@@ -126,16 +165,35 @@ psql -U corefoundry -d corefoundry -c "\d knowledge_chunks"
 ```
 
 ### ❌ Busca não encontra (mas chunks existem)
-A busca usa `ILIKE '%query%'`:
-- `"barco"` → encontra "O barco era vermelho" ✅
-- `"Barco"` → encontra (case-insensitive) ✅  
-- `"navio"` → NÃO encontra (palavra diferente) ❌
+A busca usa extração de keywords + `ILIKE` com OR:
+- Query: `"qual era a cor da tela?"` → Keywords: `['cor', 'tela']`
+- SQL: `WHERE (content ILIKE '%cor%' OR content ILIKE '%tela%')`
+- `"A tela era azul"` → ✅ encontra (contém 'tela')
+- `"A cor do barco"` → ✅ encontra (contém 'cor')  
+- `"O céu estava bonito"` → ❌ NÃO encontra (nenhuma keyword)
+
+**Se ainda não encontrar**, veja os logs:
+```log
+[INFO] Extracted keywords: ['cor', 'tela']
+[WARNING] Sample chunk content: 'O barco era vermelho...'
+```
+
+Verifique se:
+1. Keywords foram extraídas corretamente
+2. Conteúdo do chunk realmente contém alguma keyword
+3. Não há problema de encoding/acentuação
 
 **Teste manual**:
 ```sql
+-- Ver conteúdo real do chunk
+SELECT id, source, content 
+FROM knowledge_chunks 
+WHERE agent_id = 10;
+
+-- Testar busca por keyword individual
 SELECT * FROM knowledge_chunks 
 WHERE agent_id = 10 
-  AND content ILIKE '%barco%';
+  AND (content ILIKE '%cor%' OR content ILIKE '%tela%');
 ```
 
 ## 🔬 Teste Manual Completo
@@ -191,24 +249,30 @@ WHERE agent_id IS NULL;
 
 ## 🎯 Próximos Passos (Melhorias)
 
-Se mesmo após debugar o problema persistir, considere:
+Se mesmo após a busca por keywords o problema persistir, considere:
 
-1. **Melhorar busca**: usar busca em múltiplos campos
+1. **Usar embeddings**: trocar busca ILIKE por vector search (pgvector)
+   - Busca semântica: "barco" encontra "embarcação"
+   - Requer modelo de embeddings e extensão pgvector
+
+2. **Aumentar limit**: mudar de 3 para 5-10 chunks
+   - Mais contexto para o LLM
+   - Mas pode aumentar latência
+
+3. **Buscar em múltiplos campos**:
 ```python
 # Buscar em content + source + metadata
 query_obj = self.db.query(KnowledgeChunk).filter(
     db.or_(
-        KnowledgeChunk.content.ilike(f"%{query}%"),
-        KnowledgeChunk.source.ilike(f"%{query}%")
+        KnowledgeChunk.content.ilike(f"%{keyword}%"),
+        KnowledgeChunk.source.ilike(f"%{keyword}%")
     )
 )
 ```
 
-2. **Usar embeddings**: trocar busca ILIKE por vector search (pgvector)
+4. **Ranqueamento por relevância**: ordenar chunks por número de keywords encontradas
 
-3. **Aumentar limit**: mudar de 3 para 5 chunks
-
-4. **Logar messages enviados ao Ollama**: ver exatamente o contexto montado
+5. **Logar messages enviados ao Ollama**: ver exatamente o contexto montado
 
 ## 📁 Arquivos Modificados
 

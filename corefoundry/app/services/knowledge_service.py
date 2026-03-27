@@ -2,9 +2,24 @@
 
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from corefoundry.app.db.models import KnowledgeChunk
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import logging
+import re
+
+
+# Stop words em português (palavras comuns que não agregam significado na busca)
+STOP_WORDS = {
+    'a', 'o', 'as', 'os', 'de', 'da', 'do', 'das', 'dos', 'em', 'no', 'na', 'nos', 'nas',
+    'um', 'uma', 'uns', 'umas', 'por', 'para', 'com', 'sem', 'sob', 'sobre',
+    'que', 'qual', 'quais', 'quando', 'onde', 'como', 'é', 'são', 'era', 'eram',
+    'foi', 'foram', 'ser', 'estar', 'ter', 'haver', 'fazer', 'ir', 'vir', 'ver',
+    'e', 'ou', 'mas', 'se', 'não', 'também', 'só', 'já', 'mais', 'muito', 'esse',
+    'essa', 'este', 'esta', 'isso', 'isto', 'aquele', 'aquela', 'aquilo', 'me', 'te',
+    'lhe', 'nos', 'vos', 'lhes', 'meu', 'teu', 'seu', 'nosso', 'vosso', 'minha',
+    'tua', 'sua', 'nossa', 'vossa', 'dele', 'dela', 'deles', 'delas'
+}
 
 
 class KnowledgeService:
@@ -23,6 +38,27 @@ class KnowledgeService:
             chunk_overlap=200,
             length_function=len,
         )
+    
+    def _extract_keywords(self, query: str) -> List[str]:
+        """
+        Extract relevant keywords from query by removing stop words.
+        
+        Args:
+            query: Search query
+            
+        Returns:
+            List of keywords
+        """
+        # Convert to lowercase and remove punctuation
+        clean_query = re.sub(r'[^\w\s]', ' ', query.lower())
+        
+        # Split into words
+        words = clean_query.split()
+        
+        # Remove stop words and short words (< 3 chars)
+        keywords = [w for w in words if w not in STOP_WORDS and len(w) >= 3]
+        
+        return keywords
     
     def upload_text(
         self,
@@ -77,10 +113,10 @@ class KnowledgeService:
         limit: int = 5
     ) -> List[KnowledgeChunk]:
         """
-        Search for relevant knowledge chunks.
+        Search for relevant knowledge chunks using keyword extraction.
         
-        For now, this is a simple text search. In the future, this could use
-        vector embeddings for semantic search.
+        Extracts keywords from the query and searches for chunks containing
+        any of those keywords. This improves recall compared to exact phrase matching.
         
         Args:
             query: Search query
@@ -93,11 +129,24 @@ class KnowledgeService:
         logger = logging.getLogger("corefoundry.knowledge.search")
         logger.info("Searching chunks: query='%s' agent_id=%s limit=%d", query, agent_id, limit)
         
-        # Simple text search using SQL LIKE
-        # In production, you'd want to use vector embeddings
-        query_obj = self.db.query(KnowledgeChunk).filter(
-            KnowledgeChunk.content.ilike(f"%{query}%")
-        )
+        # Extract keywords from query
+        keywords = self._extract_keywords(query)
+        logger.info("Extracted keywords: %s", keywords)
+        
+        # Build query with OR conditions for each keyword
+        query_obj = self.db.query(KnowledgeChunk)
+        
+        if keywords:
+            # Create OR conditions for each keyword
+            keyword_filters = [
+                KnowledgeChunk.content.ilike(f"%{keyword}%") 
+                for keyword in keywords
+            ]
+            query_obj = query_obj.filter(or_(*keyword_filters))
+        else:
+            # Fallback to original query if no keywords extracted
+            logger.warning("No keywords extracted from query, using original: '%s'", query)
+            query_obj = query_obj.filter(KnowledgeChunk.content.ilike(f"%{query}%"))
         
         if agent_id is not None:
             query_obj = query_obj.filter(KnowledgeChunk.agent_id == agent_id)
@@ -113,6 +162,12 @@ class KnowledgeService:
                 agent_chunks = self.db.query(KnowledgeChunk).filter(KnowledgeChunk.agent_id == agent_id).count()
                 logger.warning("No matches found! Total chunks in DB: %d, Chunks for agent_id=%s: %d", 
                              total_chunks, agent_id, agent_chunks)
+                # Log sample chunk content for debugging
+                if agent_chunks > 0:
+                    sample = self.db.query(KnowledgeChunk).filter(
+                        KnowledgeChunk.agent_id == agent_id
+                    ).first()
+                    logger.warning("Sample chunk content: '%s'", sample.content[:200])
             else:
                 logger.warning("No matches found! Total chunks in DB: %d", total_chunks)
         
