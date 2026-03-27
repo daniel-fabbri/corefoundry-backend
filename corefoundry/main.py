@@ -8,6 +8,11 @@ from fastapi.responses import FileResponse, Response
 import httpx
 from corefoundry.app.routes import health, agents, knowledge, auth
 from corefoundry.configs.settings import settings
+import logging
+
+# Configure basic logging
+log_level = logging.DEBUG if settings.DEBUG else logging.INFO
+logging.basicConfig(level=log_level, format='[%(levelname)s] %(asctime)s %(name)s: %(message)s')
 
 # API metadata
 tags_metadata = [

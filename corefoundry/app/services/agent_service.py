@@ -10,6 +10,7 @@ from corefoundry.app.services.knowledge_service import KnowledgeService
 from langchain_postgres import PostgresChatMessageHistory
 from langchain.schema import HumanMessage, AIMessage
 from corefoundry.configs.settings import settings
+import logging
 
 
 class AgentService:
@@ -315,6 +316,17 @@ class AgentService:
                 agent_id=agent_id,
                 limit=3
             )
+            # Debug logging for knowledge usage
+            try:
+                logger = logging.getLogger("corefoundry.agent.chat")
+                logger.debug("Chat requested with use_knowledge=True for agent_id=%s user_id=%s thread_id=%s", agent_id, user_id, thread_id)
+                logger.debug("Found %d relevant chunks for query=%s", len(relevant_chunks), user_input)
+                for c in relevant_chunks:
+                    # limit content length in logs
+                    preview = (c.content[:200] + "...") if len(c.content) > 200 else c.content
+                    logger.debug("Chunk id=%s source=%s agent_id=%s preview=%s", getattr(c, 'id', None), getattr(c, 'source', None), getattr(c, 'agent_id', None), preview)
+            except Exception:
+                pass
             if relevant_chunks:
                 context = "\n\n".join([chunk.content for chunk in relevant_chunks])
                 messages.append({
