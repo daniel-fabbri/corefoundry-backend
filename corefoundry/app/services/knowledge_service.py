@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from corefoundry.app.db.models import KnowledgeChunk
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+import logging
 
 
 class KnowledgeService:
@@ -89,6 +90,9 @@ class KnowledgeService:
         Returns:
             List of KnowledgeChunk objects
         """
+        logger = logging.getLogger("corefoundry.knowledge.search")
+        logger.info("Searching chunks: query='%s' agent_id=%s limit=%d", query, agent_id, limit)
+        
         # Simple text search using SQL LIKE
         # In production, you'd want to use vector embeddings
         query_obj = self.db.query(KnowledgeChunk).filter(
@@ -97,8 +101,22 @@ class KnowledgeService:
         
         if agent_id is not None:
             query_obj = query_obj.filter(KnowledgeChunk.agent_id == agent_id)
+            logger.info("Filtering by agent_id=%s", agent_id)
         
-        return query_obj.limit(limit).all()
+        results = query_obj.limit(limit).all()
+        logger.info("Search returned %d chunks", len(results))
+        
+        if len(results) == 0:
+            # Log diagnostic info
+            total_chunks = self.db.query(KnowledgeChunk).count()
+            if agent_id is not None:
+                agent_chunks = self.db.query(KnowledgeChunk).filter(KnowledgeChunk.agent_id == agent_id).count()
+                logger.warning("No matches found! Total chunks in DB: %d, Chunks for agent_id=%s: %d", 
+                             total_chunks, agent_id, agent_chunks)
+            else:
+                logger.warning("No matches found! Total chunks in DB: %d", total_chunks)
+        
+        return results
     
     def get_chunk(self, chunk_id: int) -> Optional[KnowledgeChunk]:
         """

@@ -302,6 +302,11 @@ class AgentService:
         # Build messages for Ollama
         messages = []
         
+        # Log request info
+        logger = logging.getLogger("corefoundry.agent.chat")
+        logger.info("=== CHAT REQUEST === agent_id=%s user_id=%s thread_id=%s use_knowledge=%s", 
+                    agent_id, user_id, thread_id, use_knowledge)
+        
         # Add system message if configured
         if agent.config and agent.config.get("system_prompt"):
             messages.append({
@@ -311,28 +316,31 @@ class AgentService:
         
         # Add knowledge context if requested
         if use_knowledge:
+            logger.info("Knowledge search: query='%s' agent_id=%s", user_input, agent_id)
             relevant_chunks = self.knowledge_service.search_chunks(
                 query=user_input,
                 agent_id=agent_id,
                 limit=3
             )
             # Debug logging for knowledge usage
-            try:
-                logger = logging.getLogger("corefoundry.agent.chat")
-                logger.debug("Chat requested with use_knowledge=True for agent_id=%s user_id=%s thread_id=%s", agent_id, user_id, thread_id)
-                logger.debug("Found %d relevant chunks for query=%s", len(relevant_chunks), user_input)
-                for c in relevant_chunks:
-                    # limit content length in logs
-                    preview = (c.content[:200] + "...") if len(c.content) > 200 else c.content
-                    logger.debug("Chunk id=%s source=%s agent_id=%s preview=%s", getattr(c, 'id', None), getattr(c, 'source', None), getattr(c, 'agent_id', None), preview)
-            except Exception:
-                pass
+            logger.info("Found %d relevant chunks", len(relevant_chunks))
+            if len(relevant_chunks) == 0:
+                logger.warning("NO CHUNKS FOUND! Check: 1) chunks exist for agent_id=%s, 2) query matches content", agent_id)
+            for idx, c in enumerate(relevant_chunks):
+                # limit content length in logs
+                preview = (c.content[:150] + "...") if len(c.content) > 150 else c.content
+                logger.info("Chunk[%d]: id=%s source='%s' agent_id=%s preview='%s'", 
+                           idx, getattr(c, 'id', None), getattr(c, 'source', None), 
+                           getattr(c, 'agent_id', None), preview)
             if relevant_chunks:
                 context = "\n\n".join([chunk.content for chunk in relevant_chunks])
+                logger.info("Adding context to messages (%d chars total)", len(context))
                 messages.append({
                     "role": "system",
                     "content": f"Relevant context from knowledge base:\n{context}"
                 })
+        else:
+            logger.info("use_knowledge=False, skipping knowledge search")
         
         # Add conversation history (reverse to get chronological order)
         for msg in reversed(history[1:]):  # Skip the user message we just saved

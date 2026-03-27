@@ -340,7 +340,7 @@ async def get_history(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     
-    messages = service.get_messages(
+    messages = service.get_conversation_history(
         agent_id=agent_id,
         thread_id=thread_id,
         limit=limit
