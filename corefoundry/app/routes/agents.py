@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from corefoundry.app.db.connection import get_db
 from corefoundry.app.services.agent_service import AgentService
+from corefoundry.app.db.auth_models import AuthUser
+from corefoundry.app.routes.auth import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -34,7 +36,6 @@ class AgentResponse(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chat."""
     input: str
-    user_id: int
     thread_id: int
     use_knowledge: bool = False
 
@@ -80,7 +81,6 @@ class ThreadResponse(BaseModel):
 
 class CreateThreadRequest(BaseModel):
     """Request model for creating thread."""
-    user_id: int
     title: Optional[str] = None
 
 
@@ -88,6 +88,7 @@ class CreateThreadRequest(BaseModel):
 @router.post("/create", response_model=AgentResponse)
 async def create_agent(
     request: CreateAgentRequest,
+    current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -95,6 +96,7 @@ async def create_agent(
     
     Args:
         request: Agent creation request
+        current_user: Current authenticated user
         db: Database session
         
     Returns:
@@ -102,6 +104,7 @@ async def create_agent(
     """
     service = AgentService(db)
     agent = service.create_agent(
+        user_id=current_user.id,
         name=request.name,
         description=request.description,
         model_name=request.model_name,
@@ -119,25 +122,34 @@ async def create_agent(
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
-async def get_agent(agent_id: int, db: Session = Depends(get_db)):
+async def get_agent(
+    agent_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Get an agent by ID.
     
     Args:
         agent_id: Agent ID
+        current_user: Current authenticated user
         db: Database session
         
     Returns:
         Agent details
         
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or user doesn't have access
     """
     service = AgentService(db)
     agent = service.get_agent(agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     
     return AgentResponse(
         id=agent.id,
@@ -150,18 +162,22 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[AgentResponse])
-async def list_agents(db: Session = Depends(get_db)):
+async def list_agents(
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    List all agents.
+    List all agents for the current user.
     
     Args:
+        current_user: Current authenticated user
         db: Database session
         
     Returns:
-        List of agents
+        List of agents belonging to the current user
     """
     service = AgentService(db)
-    agents = service.list_agents()
+    agents = service.list_agents(user_id=current_user.id)
     
     return [
         AgentResponse(
@@ -180,6 +196,7 @@ async def list_agents(db: Session = Depends(get_db)):
 async def chat(
     agent_id: int,
     request: ChatRequest,
+    current_user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -188,20 +205,29 @@ async def chat(
     Args:
         agent_id: Agent ID
         request: Chat request
+        current_user: Current authenticated user
         db: Database session
         
     Returns:
         Chat response
         
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or user doesn't have access
     """
     service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     
     try:
         result = await service.chat(
             agent_id=agent_id,
-            user_id=request.user_id,
+            user_id=current_user.id,
             thread_id=request.thread_id,
             user_input=request.input,
             use_knowledge=request.use_knowledge
@@ -216,33 +242,44 @@ async def chat(
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
+async def delete_agent(
+    agent_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
     Delete an agent.
     
     Args:
         agent_id: Agent ID
+        current_user: Current authenticated user
         db: Database session
         
     Returns:
         Success message
         
     Raises:
-        HTTPException: If agent not found
+        HTTPException: If agent not found or user doesn't have access
     """
     service = AgentService(db)
+    agent = service.get_agent(agent_id)
     
-    if not service.delete_agent(agent_id):
+    if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    service.delete_agent(agent_id)
     return {"message": "Agent deleted successfully"}
 
 
 @router.get("/{agent_id}/history")
 async def get_history(
     agent_id: int,
-    user_id: int,
     thread_id: int,
+    current_user: AuthUser = Depends(get_current_user),
     limit: int = 50,
     db: Session = Depends(get_db)
 ):
@@ -251,27 +288,37 @@ async def get_history(
     
     Args:
         agent_id: Agent ID
-        user_id: Selected user ID
-        thread_id: Selected thread ID
-        limit: Maximum number of messages
+        thread_id: Thread ID
+        current_user: Current authenticated user
+        limit: Maximum number of messages to return
         db: Database session
         
     Returns:
         List of messages
+        
+    Raises:
+        HTTPException: If agent not found or user doesn't have access
     """
     service = AgentService(db)
-    
-    # Check if agent exists
     agent = service.get_agent(agent_id)
+    
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
     try:
-        service.validate_thread_scope(agent_id=agent_id, user_id=user_id, thread_id=thread_id)
+        service.validate_thread_scope(agent_id, current_user.id, thread_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-    messages = service.get_conversation_history(agent_id, thread_id, limit)
+    
+    messages = service.get_messages(
+        agent_id=agent_id,
+        thread_id=thread_id,
+        limit=limit
+    )
     
     return [
         {
@@ -315,20 +362,23 @@ async def create_chat_user(request: CreateChatUserRequest, db: Session = Depends
 
 
 @router.get("/{agent_id}/threads", response_model=list[ThreadResponse])
-async def list_threads(agent_id: int, user_id: int, db: Session = Depends(get_db)):
+async def list_threads(
+    agent_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """List threads for a specific user-agent pair."""
-    from corefoundry.app.db.auth_models import AuthUser
     service = AgentService(db)
+    agent = service.get_agent(agent_id)
 
-    if not service.get_agent(agent_id):
+    if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    # Validate user exists in auth_users (not chat_users)
-    user = db.query(AuthUser).filter(AuthUser.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    threads = service.list_threads(agent_id=agent_id, user_id=user_id)
+    threads = service.list_threads(agent_id=agent_id, user_id=current_user.id)
     return [
         ThreadResponse(
             id=thread.id,
@@ -343,13 +393,27 @@ async def list_threads(agent_id: int, user_id: int, db: Session = Depends(get_db
 
 
 @router.post("/{agent_id}/threads", response_model=ThreadResponse)
-async def create_thread(agent_id: int, request: CreateThreadRequest, db: Session = Depends(get_db)):
+async def create_thread(
+    agent_id: int,
+    request: CreateThreadRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Create a thread for a specific user-agent pair."""
     service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
     try:
         thread = service.create_thread(
             agent_id=agent_id,
-            user_id=request.user_id,
+            user_id=current_user.id,
             title=request.title,
         )
     except ValueError as e:

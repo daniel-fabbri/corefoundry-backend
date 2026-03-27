@@ -28,6 +28,7 @@ class AgentService:
     
     def create_agent(
         self,
+        user_id: int,
         name: str,
         description: Optional[str] = None,
         model_name: Optional[str] = None,
@@ -37,6 +38,7 @@ class AgentService:
         Create a new agent.
         
         Args:
+            user_id: User ID who owns the agent
             name: Agent name
             description: Agent description
             model_name: Ollama model name
@@ -46,6 +48,7 @@ class AgentService:
             Created Agent object
         """
         agent = Agent(
+            user_id=user_id,
             name=name,
             description=description,
             model_name=model_name or settings.OLLAMA_MODEL,
@@ -68,17 +71,23 @@ class AgentService:
         """
         return self.db.query(Agent).filter(Agent.id == agent_id).first()
     
-    def list_agents(self, limit: int = 100) -> List[Agent]:
+    def list_agents(self, user_id: Optional[int] = None, limit: int = 100) -> List[Agent]:
         """
-        List all agents.
+        List agents, optionally filtered by user.
         
         Args:
+            user_id: Optional user ID to filter agents by owner
             limit: Maximum number of agents to return
             
         Returns:
             List of Agent objects
         """
-        return self.db.query(Agent).order_by(
+        query = self.db.query(Agent)
+        
+        if user_id is not None:
+            query = query.filter(Agent.user_id == user_id)
+        
+        return query.order_by(
             Agent.created_at.desc()
         ).limit(limit).all()
 

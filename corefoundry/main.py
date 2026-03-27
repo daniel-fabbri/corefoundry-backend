@@ -9,12 +9,56 @@ import httpx
 from corefoundry.app.routes import health, agents, knowledge, auth
 from corefoundry.configs.settings import settings
 
+# API metadata
+tags_metadata = [
+    {
+        "name": "health",
+        "description": "Health check endpoints for monitoring the API status."
+    },
+    {
+        "name": "auth",
+        "description": "Authentication endpoints for user registration, login, and session management."
+    },
+    {
+        "name": "agents",
+        "description": "Manage AI agents, chat with them, and handle conversation threads."
+    },
+    {
+        "name": "knowledge",
+        "description": "Manage knowledge base for RAG (Retrieval Augmented Generation)."
+    }
+]
+
 # Create FastAPI app
 app = FastAPI(
-    title="CoreFoundry",
-    description="A simple way to build agents using LangChain and Ollama",
+    title="CoreFoundry API",
+    description="""
+## CoreFoundry - AI Agent Platform
+
+Build and manage AI agents powered by LangChain and Ollama.
+
+### Features
+
+* 🤖 **Agent Management**: Create, update, and manage AI agents
+* 💬 **Chat Interface**: Interactive conversations with agents
+* 🧵 **Thread Management**: Organize conversations by topics
+* 📚 **Knowledge Base**: Integrate RAG for enhanced responses
+* 🔐 **Authentication**: Secure user authentication and authorization
+
+### Authentication
+
+Most endpoints require authentication using Bearer tokens. 
+To authenticate:
+1. Register a new account at `/api/auth/register`
+2. Login at `/api/auth/login` to get an access token
+3. Include the token in the Authorization header: `Bearer <token>`
+    """,
     version="0.1.0",
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_tags=tags_metadata,
+    openapi_url="/api/openapi.json"
 )
 
 # Add CORS middleware

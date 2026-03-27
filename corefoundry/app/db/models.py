@@ -13,6 +13,7 @@ class Agent(Base):
     __tablename__ = "agents"
     
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("auth_users.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     model_name = Column(String(255), nullable=False, default="llama2")
@@ -21,6 +22,7 @@ class Agent(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
+    user = relationship("AuthUser", foreign_keys=[user_id])
     messages = relationship("Message", back_populates="agent", cascade="all, delete-orphan")
     memory_entries = relationship("Memory", back_populates="agent", cascade="all, delete-orphan")
     threads = relationship("Thread", back_populates="agent", cascade="all, delete-orphan")
