@@ -288,18 +288,25 @@ class AgentService:
 User: {user_input}
 Assistant: {assistant_message}
 
-Extract information in the following format (only if relevant information exists):
-- If the user mentions their name, preferences, projects, or personal information
-- If important facts or decisions are discussed
-- If specific details about tasks or goals are mentioned
+Extract ONLY truly important and useful information:
+- User's name, preferences, or personal details
+- Important facts or decisions mentioned
+- Specific details about tasks, goals, or projects
+- User's interests or favorites (teams, languages, frameworks, etc.)
 
-Return ONLY a JSON object with key-value pairs of memorable information. Keys should be descriptive (e.g., "user_name", "preferred_language", "current_project").
-If there's nothing important to remember, return an empty JSON object: {{}}
+IMPORTANT RULES:
+- Keys should be short, descriptive identifiers (e.g., "user_name", "favorite_team", "current_project")
+- Values should be SIMPLE TEXT, not nested objects or complex structures
+- Only save information that would be useful in future conversations
+- If nothing important to remember, return empty object: {{}}
 
-Example response:
-{{"user_name": "João", "preferred_language": "Python", "current_project": "CoreFoundry"}}
+GOOD Example:
+{{"user_name": "João", "favorite_team": "Flamengo", "preferred_language": "Python"}}
 
-JSON:"""
+BAD Example (don't do this):
+{{"user_interest": {{"inquiry_about_team": true}}, "data": {{"key": "value"}}}}
+
+Return ONLY valid JSON:"""
 
             # Call LLM to extract memories
             response = await ollama_service.chat(
@@ -325,16 +332,28 @@ JSON:"""
                 if memories and isinstance(memories, dict):
                     for key, value in memories.items():
                         if key and value:  # Only save non-empty keys/values
+                            # Convert complex values to readable format
+                            if isinstance(value, (dict, list)):
+                                # If it's a dict/list, convert to JSON string
+                                value_str = json.dumps(value, ensure_ascii=False)
+                            else:
+                                # Simple value, just convert to string
+                                value_str = str(value)
+                            
+                            # Skip if value is too generic or useless
+                            if value_str.lower() in ['none', 'null', 'true', 'false', '{}', '[]']:
+                                continue
+                                
                             self.memory_service.save_memory(
                                 agent_id=agent_id,
                                 key=key,
-                                value=str(value),
+                                value=value_str,
                                 metadata={
                                     "auto_extracted": True,
                                     "source": "conversation"
                                 }
                             )
-                            logger.info(f"Auto-saved memory: {key} = {value}")
+                            logger.info(f"Auto-saved memory: {key} = {value_str}")
             
             except json.JSONDecodeError:
                 logger.debug(f"Could not parse memories from LLM response: {content}")
@@ -396,15 +415,19 @@ JSON:"""
         
         # Add memories context (always include stored memories)
         memories = self.memory_service.get_all_memories(agent_id)
+        logger.info("Fetched %d memories for agent_id=%s", len(memories) if memories else 0, agent_id)
         if memories:
-            memory_context = "Information I remember about you and our interactions:\n"
+            memory_context = "=== STORED MEMORIES ===\nThe following information has been saved about the user and previous conversations:\n\n"
             for memory in memories:
-                memory_context += f"- {memory.key}: {memory.value}\n"
-            logger.info("Adding %d memories to context", len(memories))
+                memory_context += f"• {memory.key}: {memory.value}\n"
+            memory_context += "\nPlease use this information to provide contextual and personalized responses.\n"
+            logger.info("Memory context being added:\n%s", memory_context)
             messages.append({
                 "role": "system",
                 "content": memory_context
             })
+        else:
+            logger.warning("No memories found for agent_id=%s", agent_id)
         
         # Add knowledge context if requested
         if use_knowledge:
