@@ -2,6 +2,7 @@
 
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from corefoundry.app.db.connection import get_db
@@ -623,6 +624,36 @@ async def list_knowledge_files(
             )
     
     return files
+
+
+@router.get("/{agent_id}/knowledge/files/{filename}")
+async def download_knowledge_file(
+    agent_id: int,
+    filename: str,
+    current_user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Download a knowledge file."""
+    service = AgentService(db)
+    agent = service.get_agent(agent_id)
+    
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify the agent belongs to the current user
+    if agent.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get file path
+    file_path = Path("uploads") / str(agent_id) / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type='application/octet-stream'
+    )
 
 
 @router.delete("/{agent_id}/knowledge/files/{filename}")
