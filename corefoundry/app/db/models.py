@@ -123,3 +123,52 @@ class Thread(Base):
 
     def __repr__(self):
         return f"<Thread(id={self.id}, agent_id={self.agent_id}, user_id={self.user_id}, title='{self.title}')>"
+
+
+class Cronjob(Base):
+    """Cronjob model for storing scheduled HTTP request configurations."""
+    
+    __tablename__ = "cronjobs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("auth_users.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    url = Column(Text, nullable=False)
+    method = Column(String(10), nullable=False, default="GET")
+    headers = Column(JSON, nullable=True)
+    body = Column(JSON, nullable=True)
+    interval_minutes = Column(Integer, nullable=False, default=1)
+    is_active = Column(Integer, nullable=False, default=1)  # SQLite uses INTEGER for BOOLEAN
+    last_run_at = Column(DateTime, nullable=True)
+    last_status_code = Column(Integer, nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("AuthUser", foreign_keys=[user_id])
+    logs = relationship("CronjobLog", back_populates="cronjob", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Cronjob(id={self.id}, name='{self.name}', url='{self.url}', active={bool(self.is_active)})>"
+
+
+class CronjobLog(Base):
+    """CronjobLog model for storing execution history."""
+    
+    __tablename__ = "cronjob_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    cronjob_id = Column(Integer, ForeignKey("cronjobs.id"), nullable=False, index=True)
+    executed_at = Column(DateTime, default=datetime.utcnow)
+    status_code = Column(Integer, nullable=True)
+    response_time_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    response_body = Column(Text, nullable=True)
+    
+    # Relationships
+    cronjob = relationship("Cronjob", back_populates="logs")
+    
+    def __repr__(self):
+        return f"<CronjobLog(id={self.id}, cronjob_id={self.cronjob_id}, status={self.status_code})>"

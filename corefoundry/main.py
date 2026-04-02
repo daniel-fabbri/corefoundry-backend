@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 import httpx
-from corefoundry.app.routes import health, agents, knowledge, auth
+from corefoundry.app.routes import health, agents, knowledge, auth, cronjobs
 from corefoundry.configs.settings import settings
+from corefoundry.app.services.cronjob_scheduler import start_scheduler, shutdown_scheduler
 import logging
 
 # Configure basic logging
@@ -31,6 +32,10 @@ tags_metadata = [
     {
         "name": "knowledge",
         "description": "Manage knowledge base for RAG (Retrieval Augmented Generation)."
+    },
+    {
+        "name": "cronjobs",
+        "description": "Schedule and manage automated HTTP requests (cronjobs)."
     }
 ]
 
@@ -45,6 +50,7 @@ Build and manage AI agents powered by LangChain and Ollama.
 ### Features
 
 * 🤖 **Agent Management**: Create, update, and manage AI agents
+* ⏰ **Cronjobs**: Schedule automated HTTP requests and monitor execution
 * 💬 **Chat Interface**: Interactive conversations with agents
 * 🧵 **Thread Management**: Organize conversations by topics
 * 📚 **Knowledge Base**: Integrate RAG for enhanced responses
@@ -79,6 +85,7 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
+app.include_router(cronjobs.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
 
 
@@ -229,6 +236,37 @@ else:
                 "knowledge": "/api/knowledge"
             }
         }
+# Application lifecycle events
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on application startup."""
+    logger = logging.getLogger(__name__)
+    logger.info("Starting CoreFoundry API...")
+    
+    try:
+        # Start the cronjob scheduler
+        start_scheduler()
+        logger.info("Cronjob scheduler started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start cronjob scheduler: {e}", exc_info=True)
+        # Don't prevent app startup if scheduler fails
+        pass
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup services on application shutdown."""
+    logger = logging.getLogger(__name__)
+    logger.info("Shutting down CoreFoundry API...")
+    
+    try:
+        # Stop the cronjob scheduler
+        shutdown_scheduler()
+        logger.info("Cronjob scheduler stopped successfully")
+    except Exception as e:
+        logger.error(f"Error during scheduler shutdown: {e}", exc_info=True)
+
+
 
 
 if __name__ == "__main__":
