@@ -1,7 +1,7 @@
 """Database models."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import relationship
 from corefoundry.app.db.connection import Base
 from corefoundry.app.db.auth_models import AuthUser
@@ -139,7 +139,7 @@ class Cronjob(Base):
     headers = Column(JSON, nullable=True)
     body = Column(JSON, nullable=True)
     interval_minutes = Column(Integer, nullable=False, default=1)
-    is_active = Column(Integer, nullable=False, default=1)  # SQLite uses INTEGER for BOOLEAN
+    is_active = Column(Boolean, nullable=False, default=True)
     last_run_at = Column(DateTime, nullable=True)
     last_status_code = Column(Integer, nullable=True)
     last_error = Column(Text, nullable=True)

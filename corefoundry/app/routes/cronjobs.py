@@ -89,10 +89,6 @@ def list_cronjobs(
             Cronjob.user_id == current_user.id
         ).order_by(Cronjob.created_at.desc()).offset(skip).limit(limit).all()
         
-        # Convert is_active from int to bool for response
-        for cronjob in cronjobs:
-            cronjob.is_active = bool(cronjob.is_active)
-        
         return cronjobs
     except Exception as e:
         logger.error(f"Error listing cronjobs: {e}", exc_info=True)
@@ -116,15 +112,12 @@ def create_cronjob(
             headers=request.headers,
             body=request.body,
             interval_minutes=request.interval_minutes,
-            is_active=1 if request.is_active else 0
+            is_active=request.is_active
         )
         
         db.add(cronjob)
         db.commit()
         db.refresh(cronjob)
-        
-        # Convert is_active to bool for response
-        cronjob.is_active = bool(cronjob.is_active)
         
         logger.info(f"Created cronjob {cronjob.id} for user {current_user.id}")
         return cronjob
@@ -150,9 +143,6 @@ def get_cronjob(
     if not cronjob:
         raise HTTPException(status_code=404, detail="Cronjob not found")
     
-    # Convert is_active to bool for response
-    cronjob.is_active = bool(cronjob.is_active)
-    
     return cronjob
 
 
@@ -176,10 +166,6 @@ def update_cronjob(
         # Update only provided fields
         update_data = request.model_dump(exclude_unset=True)
         
-        # Convert is_active to int for database
-        if "is_active" in update_data:
-            update_data["is_active"] = 1 if update_data["is_active"] else 0
-        
         # Convert method to uppercase
         if "method" in update_data:
             update_data["method"] = update_data["method"].upper()
@@ -189,9 +175,6 @@ def update_cronjob(
         
         db.commit()
         db.refresh(cronjob)
-        
-        # Convert is_active to bool for response
-        cronjob.is_active = bool(cronjob.is_active)
         
         logger.info(f"Updated cronjob {cronjob_id}")
         return cronjob
@@ -274,12 +257,9 @@ def toggle_cronjob(
         raise HTTPException(status_code=404, detail="Cronjob not found")
     
     try:
-        cronjob.is_active = 0 if cronjob.is_active else 1
+        cronjob.is_active = not cronjob.is_active
         db.commit()
         db.refresh(cronjob)
-        
-        # Convert is_active to bool for response
-        cronjob.is_active = bool(cronjob.is_active)
         
         logger.info(f"Toggled cronjob {cronjob_id} to {'active' if cronjob.is_active else 'inactive'}")
         return cronjob

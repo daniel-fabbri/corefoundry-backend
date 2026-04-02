@@ -78,7 +78,7 @@ class CronjobScheduler:
         try:
             # Get all active cronjobs
             active_cronjobs = db.query(Cronjob).filter(
-                Cronjob.is_active == 1
+                Cronjob.is_active == True
             ).all()
             
             if not active_cronjobs:
